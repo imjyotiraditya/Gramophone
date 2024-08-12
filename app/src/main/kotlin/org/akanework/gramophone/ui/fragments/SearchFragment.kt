@@ -25,6 +25,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -80,6 +84,34 @@ class SearchFragment : BaseFragment(false) {
 
         // Build FastScroller.
         recyclerView.fastScroll(songAdapter, songAdapter.itemHeightHelper)
+
+        ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, windowInsets ->
+            val imeHeight = windowInsets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            val navigationBarHeight =
+                windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+
+            recyclerView.updatePadding(bottom = imeHeight + navigationBarHeight)
+
+            windowInsets
+        }
+
+        ViewCompat.setWindowInsetsAnimationCallback(
+            rootView,
+            object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                override fun onProgress(
+                    insets: WindowInsetsCompat,
+                    runningAnimations: List<WindowInsetsAnimationCompat>
+                ): WindowInsetsCompat {
+                    val imeHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+                    val navigationBarHeight =
+                        insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+
+                    recyclerView.updatePadding(bottom = imeHeight + navigationBarHeight)
+
+                    return insets
+                }
+            }
+        )
 
         editText.addTextChangedListener { rawText ->
             // TODO sort results by match quality? (using NaturalOrderHelper)
