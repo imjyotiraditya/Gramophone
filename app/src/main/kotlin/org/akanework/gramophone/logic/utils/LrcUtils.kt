@@ -95,7 +95,6 @@ object LrcUtils {
         if (lrcContent.isBlank()) return null
 
         val timeMarksRegex = "\\[(\\d{2}:\\d{2})([.:]\\d+)?]".toRegex()
-        val wordTimeMarksRegex = "<(\\d{2}:\\d{2})([.:]\\d+)?>".toRegex()
         val lyricsList = mutableListOf<MediaStoreUtils.Lyric>()
         var foundNonNull = false
         var lyricsText: StringBuilder? = StringBuilder()
@@ -124,31 +123,7 @@ object LrcUtils {
                 }
 
                 lyricsText?.append("$lyricLine\n")
-
-                if (wordTimeMarksRegex.containsMatchIn(lyricLine)) {
-                    val wordMatches = wordTimeMarksRegex.findAll(lyricLine).toList()
-                    val words = lyricLine.split(wordTimeMarksRegex)
-                    val wordTimestamps = mutableListOf<Pair<Int, Long>>()
-                    var currentPosition = 0
-
-                    words.forEachIndexed { index, word ->
-                        if (index < wordMatches.size) {
-                            val wordTimeString = wordMatches[index].groupValues[1] + wordMatches[index].groupValues[2]
-                            val wordTimestamp = parseTime(wordTimeString)
-                            wordTimestamps.add(Pair(currentPosition, wordTimestamp))
-                        }
-                        currentPosition += word.length
-                    }
-
-                    lyricsList.add(MediaStoreUtils.Lyric(
-                        timestamp,
-                        lyricLine.replace(wordTimeMarksRegex, ""),
-                        false,
-                        wordTimestamps
-                    ))
-                } else {
-                    lyricsList.add(MediaStoreUtils.Lyric(timestamp, lyricLine))
-                }
+                lyricsList.add(MediaStoreUtils.Lyric(timestamp, lyricLine))
             }
         }
 
