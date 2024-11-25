@@ -26,8 +26,6 @@ import androidx.preference.PreferenceManager
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
-import kotlin.io.path.Path
-import kotlin.io.path.name
 import org.akanework.gramophone.R
 import org.akanework.gramophone.logic.getBooleanStrict
 import org.akanework.gramophone.logic.playOrPause
@@ -166,28 +164,11 @@ class AudioPreviewActivity : AppCompatActivity() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (mediaItem == null) return
-                audioTitle.text =
-                    mediaItem.mediaMetadata.title
-                        ?: mediaItem.localConfiguration?.uri?.lastPathSegment?.let { Path(it) }?.name
-                artistTextView.text = mediaItem.mediaMetadata.artist
-                mediaItem.mediaMetadata.artworkData?.let {
-                    val bitmap = BitmapFactory.decodeByteArray(it, 0, it.size)
-                    albumArt.setImageBitmap(bitmap)
-                } ?: run {
-                    albumArt.setImageResource(R.drawable.ic_default_cover)
-                }
+                updateMediaMetadata(mediaItem.mediaMetadata)
             }
 
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                audioTitle.text = mediaMetadata.title ?: player.currentMediaItem
-                    ?.localConfiguration?.uri?.lastPathSegment?.let { Path(it) }?.name
-                artistTextView.text = mediaMetadata.artist
-                mediaMetadata.artworkData?.let {
-                    val bitmap = BitmapFactory.decodeByteArray(it, 0, it.size)
-                    albumArt.setImageBitmap(bitmap)
-                } ?: run {
-                    albumArt.setImageResource(R.drawable.ic_default_cover)
-                }
+                updateMediaMetadata(mediaMetadata)
             }
         })
         playPauseButton.setOnClickListener {
@@ -287,6 +268,17 @@ class AudioPreviewActivity : AppCompatActivity() {
             if (!isUserTracking) {
                 progressDrawable.animate = false
             }
+        }
+    }
+
+    private fun updateMediaMetadata(mediaMetadata: MediaMetadata) {
+        audioTitle.text = mediaMetadata.title ?: getString(R.string.unknown_title)
+        artistTextView.text = mediaMetadata.artist ?: getString(R.string.unknown_artist)
+        mediaMetadata.artworkData?.let {
+            val bitmap = BitmapFactory.decodeByteArray(it, 0, it.size)
+            albumArt.setImageBitmap(bitmap)
+        } ?: run {
+            albumArt.setImageResource(R.drawable.ic_default_cover)
         }
     }
 }
