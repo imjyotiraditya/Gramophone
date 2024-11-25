@@ -3,6 +3,7 @@ package org.akanework.gramophone.ui
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -36,6 +37,7 @@ import org.akanework.gramophone.logic.utils.exoplayer.GramophoneRenderFactory
 import org.akanework.gramophone.ui.components.FullBottomSheet.Companion.SLIDER_UPDATE_INTERVAL
 import org.akanework.gramophone.ui.components.SquigglyProgress
 
+@OptIn(UnstableApi::class)
 class AudioPreviewActivity : AppCompatActivity() {
 
     private lateinit var d: AlertDialog
@@ -54,24 +56,25 @@ class AudioPreviewActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var runnableRunning = false
     private var isUserTracking = false
-    private var lastKnownDuration = C.TIME_UNSET
-    private val updateSliderRunnable = object : Runnable {
+
+    private val positionRunnable = object : Runnable {
         override fun run() {
-            if (lastKnownDuration != player.duration) {
-                // midi duration does not seem to be available in any callback, midi extractor bug?
-                lastKnownDuration = player.duration
-                timeSlider.valueTo = player.duration.toFloat().coerceAtLeast(1f)
-                timeSeekbar.max = player.duration.toInt()
-                durationTextView.text = convertDurationToTimeStamp(player.duration)
+            val position = convertDurationToTimeStamp(player.currentPosition)
+            val duration = player.currentMediaItem?.mediaMetadata?.durationMs
+
+//            if (duration != null && !isUserTracking) {
+//                timeSeekbar.max = duration.toInt()
+//                timeSeekbar.progress = player.currentPosition.toInt()
+//                timeSlider.valueTo = duration.toFloat()
+//                timeSlider.value = min(player.currentPosition.toFloat(), timeSlider.valueTo)
+//                currentPositionTextView.text = position
+//            }
+
+            if (player.isPlaying && runnableRunning) {
+                handler.postDelayed(this, SLIDER_UPDATE_INTERVAL)
+            } else {
+                runnableRunning = false
             }
-            val currentPosition = player.currentPosition.toFloat().coerceAtMost(timeSlider.valueTo)
-                .coerceAtLeast(timeSlider.valueFrom)
-            if (!isUserTracking) {
-                timeSlider.value = currentPosition
-                timeSeekbar.progress = currentPosition.toInt()
-                currentPositionTextView.text = convertDurationToTimeStamp(currentPosition.toLong())
-            }
-            if (runnableRunning) handler.postDelayed(this, 100)
         }
     }
 
@@ -81,8 +84,44 @@ class AudioPreviewActivity : AppCompatActivity() {
         }
     }
 
+    private val touchListener =
+        object : SeekBar.OnSeekBarChangeListener, Slider.OnSliderTouchListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    currentPositionTextView.text = convertDurationToTimeStamp((progress.toLong()))
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                isUserTracking = true
+                progressDrawable.animate = false
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                val mediaId = player.currentMediaItem?.mediaId
+                if (mediaId != null) {
+                    if (seekBar != null) {
+                        player.seekTo((seekBar.progress.toLong()))
+                    }
+                }
+                isUserTracking = false
+                progressDrawable.animate = player.isPlaying == true || player.playWhenReady == true
+            }
+
+            override fun onStartTrackingTouch(slider: Slider) {
+                isUserTracking = true
+            }
+
+            override fun onStopTrackingTouch(slider: Slider) {
+                val mediaId = player.currentMediaItem?.mediaId
+                if (mediaId != null) {
+                    player.seekTo((slider.value.toLong()))
+                }
+                isUserTracking = false
+            }
+        }
+
     // TODO and way to open this song in gramophone IF its part of library
-    @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
@@ -149,9 +188,7 @@ class AudioPreviewActivity : AppCompatActivity() {
             ).build()
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                runnableRunning = isPlaying
-                handler.post(updateSliderRunnable)
-                updatePlayPauseButton()
+                onIsPlayingChanged()
             }
 
             override fun onPositionDiscontinuity(
@@ -159,7 +196,7 @@ class AudioPreviewActivity : AppCompatActivity() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                handler.post(updateSliderRunnable)
+                positionRunnable.run()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -183,26 +220,8 @@ class AudioPreviewActivity : AppCompatActivity() {
             }
         }
 
-        timeSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    currentPositionTextView.text = convertDurationToTimeStamp(progress.toLong())
-                }
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                isUserTracking = true
-                progressDrawable.animate = false
-            }
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                seekBar?.let {
-                    player.seekTo(it.progress.toLong())
-                }
-                isUserTracking = false
-                progressDrawable.animate = player.isPlaying
-            }
-        })
+        timeSeekbar.setOnSeekBarChangeListener(touchListener)
+        timeSlider.addOnSliderTouchListener(touchListener)
 
         handleIntent(intent)
     }
@@ -215,7 +234,23 @@ class AudioPreviewActivity : AppCompatActivity() {
     private fun handleIntent(intent: Intent) {
         if (intent.action == Intent.ACTION_VIEW) {
             intent.data?.let { uri ->
-                player.setMediaItem(MediaItem.fromUri(uri))
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(this, uri)
+                val durationMs =
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull()
+
+                val mediaItem = MediaItem.Builder()
+                    .setMediaId(uri.toString())
+                    .setUri(uri)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setDurationMs(durationMs)
+                            .build()
+                    )
+                    .build()
+
+                player.setMediaItem(mediaItem)
                 player.prepare()
                 player.play()
             }
@@ -244,7 +279,7 @@ class AudioPreviewActivity : AppCompatActivity() {
         }
     }
 
-    private fun updatePlayPauseButton() {
+    private fun onIsPlayingChanged() {
         if (player.isPlaying) {
             if (playPauseButton.getTag(R.id.play_next) as Int? != 1) {
                 playPauseButton.icon = AppCompatResources.getDrawable(this, R.drawable.play_anim)
@@ -255,8 +290,8 @@ class AudioPreviewActivity : AppCompatActivity() {
                 progressDrawable.animate = true
             }
             if (!runnableRunning) {
-                handler.postDelayed(updateSliderRunnable, SLIDER_UPDATE_INTERVAL)
                 runnableRunning = true
+                handler.postDelayed(positionRunnable, SLIDER_UPDATE_INTERVAL)
             }
         } else if (player.playbackState != Player.STATE_BUFFERING) {
             if (playPauseButton.getTag(R.id.play_next) as Int? != 2) {
@@ -274,6 +309,7 @@ class AudioPreviewActivity : AppCompatActivity() {
     private fun updateMediaMetadata(mediaMetadata: MediaMetadata) {
         audioTitle.text = mediaMetadata.title ?: getString(R.string.unknown_title)
         artistTextView.text = mediaMetadata.artist ?: getString(R.string.unknown_artist)
+        durationTextView.text = mediaMetadata.durationMs?.let { convertDurationToTimeStamp(it) }
         mediaMetadata.artworkData?.let {
             val bitmap = BitmapFactory.decodeByteArray(it, 0, it.size)
             albumArt.setImageBitmap(bitmap)
